@@ -8,7 +8,8 @@ import {
   Float,
   Stars,
   Sparkles,
-  useTexture
+  useTexture,
+  Text
 } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
@@ -354,6 +355,48 @@ const FairyLights = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   );
 };
 
+// --- Component: Happy Birthday Text ---
+const HappyBirthdayText = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
+  const groupRef = useRef<THREE.Group>(null);
+  const textRef = useRef<any>(null);
+
+  useFrame((stateObj, delta) => {
+    if (groupRef.current) {
+      const targetScale = state === 'FORMED' ? 1 : 0;
+      groupRef.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), delta * 3);
+      
+      // Gentle floating animation
+      if (state === 'FORMED' && groupRef.current) {
+        const time = stateObj.clock.elapsedTime;
+        groupRef.current.position.y = CONFIG.heart.height / 2 + 4.5 + Math.sin(time * 0.8) * 0.2;
+        
+        // Pulse animation for text
+        if (textRef.current) {
+          const pulse = 1.0 + Math.sin(time * 1.5) * 0.05;
+          textRef.current.scale.set(pulse, pulse, pulse);
+        }
+      }
+    }
+  });
+
+  return (
+    <group ref={groupRef} position={[0, CONFIG.heart.height / 2 + 4.5, 0]}>
+      <Text
+        ref={textRef}
+        fontSize={3}
+        color={CONFIG.colors.gold}
+        anchorX="center"
+        anchorY="middle"
+        outlineWidth={0.15}
+        outlineColor={CONFIG.colors.pink}
+        letterSpacing={0.2}
+      >
+        Happy Birthday
+      </Text>
+    </group>
+  );
+};
+
 // --- Component: Top Heart (3D Heart with Pulse) ---
 const TopStar = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   const groupRef = useRef<THREE.Group>(null);
@@ -457,6 +500,7 @@ const Experience = ({ sceneState, rotationSpeed }: { sceneState: 'CHAOS' | 'FORM
            <ChristmasElements state={sceneState} />
            <FairyLights state={sceneState} />
            <TopStar state={sceneState} />
+           <HappyBirthdayText state={sceneState} />
         </Suspense>
         <Sparkles count={600} scale={50} size={8} speed={0.4} opacity={0.4} color={CONFIG.colors.silver} />
       </group>
