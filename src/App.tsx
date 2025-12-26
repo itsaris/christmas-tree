@@ -7,23 +7,13 @@ import {
   shaderMaterial,
   Float,
   Stars,
-  Sparkles,
-  useTexture,
-  Text
+  Sparkles
 } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import { MathUtils } from 'three';
 import * as random from 'maath/random';
 import { GestureRecognizer, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
-
-// --- 动态生成照片列表 (top.jpg + 1.jpg 到 31.jpg) ---
-const TOTAL_NUMBERED_PHOTOS = 31;
-// 修改：将 top.jpg 加入到数组开头
-const bodyPhotoPaths = [
-  '/photos/top.jpg',
-  ...Array.from({ length: TOTAL_NUMBERED_PHOTOS }, (_, i) => `/photos/${i + 1}.jpg`)
-];
 
 // --- 视觉配置 ---
 const CONFIG = {
@@ -37,22 +27,22 @@ const CONFIG = {
     white: '#FFFFFF',   // 纯白色
     warmLight: '#FFB6C1', // Pink light
     lights: ['#FF1744', '#FF69B4', '#FF1493', '#FFB6C1'], // Love lights
-    // 拍立得边框颜色池 (Love theme)
-    borders: ['#FFFAF0', '#FFB6C1', '#FFC0CB', '#FF69B4', '#FF1493', '#FFE4E1', '#FFF0F5'],
     // Love elements colors
     giftColors: ['#FF1744', '#FF69B4', '#FF1493', '#FFB6C1'],
-    candyColors: ['#FF1744', '#FFFFFF']
+    candyColors: ['#FF1744', '#FFFFFF'],
+    textParticles: ['#FFD700', '#FF69B4', '#FF1744', '#FF1493', '#FFB6C1'] // Colors for text particles
   },
   counts: {
     foliage: 7000,
-    ornaments: 100,   // 拍立得照片数量
+    textParticles: 5000, // Partikel untuk teks Happy Birthday
     elements: 200,    // Love elements数量
     lights: 400       // 彩灯数量
   },
   heart: { height: 22, width: 12, depth: 8 }, // Heart dimensions
-  photos: {
-    // top 属性不再需要，因为已经移入 body
-    body: bodyPhotoPaths
+  text: {
+    fontSize: 2.5,
+    letterSpacing: 0.3,
+    depth: 0.5
   }
 };
 
@@ -80,6 +70,32 @@ const FoliageMaterial = shaderMaterial(
   }`
 );
 extend({ FoliageMaterial });
+
+// --- Shader Material (Text Particles with Vertex Colors) ---
+const TextParticleMaterial = shaderMaterial(
+  { uTime: 0, uProgress: 0 },
+  `uniform float uTime; uniform float uProgress; attribute vec3 aTargetPos; attribute float aRandom;
+  varying vec3 vColor; varying float vMix;
+  float cubicInOut(float t) { return t < 0.5 ? 4.0 * t * t * t : 0.5 * pow(2.0 * t - 2.0, 3.0) + 1.0; }
+  void main() {
+    vColor = color;
+    vec3 noise = vec3(sin(uTime * 2.0 + position.x), cos(uTime * 1.5 + position.y), sin(uTime * 2.0 + position.z)) * 0.1;
+    float t = cubicInOut(uProgress);
+    vec3 finalPos = mix(position, aTargetPos + noise, t);
+    vec4 mvPosition = modelViewMatrix * vec4(finalPos, 1.0);
+    gl_PointSize = (80.0 * (1.0 + aRandom * 0.5)) / -mvPosition.z;
+    gl_Position = projectionMatrix * mvPosition;
+    vMix = t;
+  }`,
+  `varying vec3 vColor; varying float vMix;
+  void main() {
+    float r = distance(gl_PointCoord, vec2(0.5)); if (r > 0.5) discard;
+    vec3 finalColor = mix(vColor * 0.5, vColor * 2.0, vMix);
+    float alpha = (1.0 - r * 2.0) * (0.7 + vMix * 0.3);
+    gl_FragColor = vec4(finalColor, alpha);
+  }`
+);
+extend({ TextParticleMaterial });
 
 // --- Helper: Heart Shape (Parametric Heart Equation) ---
 const getHeartPosition = () => {
@@ -157,110 +173,183 @@ const Foliage = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   );
 };
 
-// --- Component: Photo Ornaments (Double-Sided Polaroid) ---
-const PhotoOrnaments = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
-  const textures = useTexture(CONFIG.photos.body);
-  const count = CONFIG.counts.ornaments;
-  const groupRef = useRef<THREE.Group>(null);
-
-  const borderGeometry = useMemo(() => new THREE.PlaneGeometry(1.2, 1.5), []);
-  const photoGeometry = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
-
-  const data = useMemo(() => {
-    return new Array(count).fill(0).map((_, i) => {
-      const chaosPos = new THREE.Vector3((Math.random()-0.5)*70, (Math.random()-0.5)*70, (Math.random()-0.5)*70);
-      const [tx, ty, tz] = getHeartPosition();
-      const targetPos = new THREE.Vector3(tx, ty, tz);
-
-      const isBig = Math.random() < 0.2;
-      const baseScale = isBig ? 2.2 : 0.8 + Math.random() * 0.6;
-      const weight = 0.8 + Math.random() * 1.2;
-      const borderColor = CONFIG.colors.borders[Math.floor(Math.random() * CONFIG.colors.borders.length)];
-
-      const rotationSpeed = {
-        x: (Math.random() - 0.5) * 1.0,
-        y: (Math.random() - 0.5) * 1.0,
-        z: (Math.random() - 0.5) * 1.0
-      };
-      const chaosRotation = new THREE.Euler(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
-
-      return {
-        chaosPos, targetPos, scale: baseScale, weight,
-        textureIndex: i % textures.length,
-        borderColor,
-        currentPos: chaosPos.clone(),
-        chaosRotation,
-        rotationSpeed,
-        wobbleOffset: Math.random() * 10,
-        wobbleSpeed: 0.5 + Math.random() * 0.5
-      };
-    });
-  }, [textures, count]);
-
-  useFrame((stateObj, delta) => {
-    if (!groupRef.current) return;
-    const isFormed = state === 'FORMED';
-    const time = stateObj.clock.elapsedTime;
-
-    groupRef.current.children.forEach((group, i) => {
-      const objData = data[i];
-      const target = isFormed ? objData.targetPos : objData.chaosPos;
-
-      objData.currentPos.lerp(target, delta * (isFormed ? 0.8 * objData.weight : 0.5));
-      group.position.copy(objData.currentPos);
-
-      if (isFormed) {
-         const targetLookPos = new THREE.Vector3(group.position.x * 2, group.position.y + 0.5, group.position.z * 2);
-         group.lookAt(targetLookPos);
-
-         const wobbleX = Math.sin(time * objData.wobbleSpeed + objData.wobbleOffset) * 0.05;
-         const wobbleZ = Math.cos(time * objData.wobbleSpeed * 0.8 + objData.wobbleOffset) * 0.05;
-         group.rotation.x += wobbleX;
-         group.rotation.z += wobbleZ;
-
-      } else {
-         group.rotation.x += delta * objData.rotationSpeed.x;
-         group.rotation.y += delta * objData.rotationSpeed.y;
-         group.rotation.z += delta * objData.rotationSpeed.z;
+// --- Helper: Generate text positions using Canvas 2D for accurate text shape ---
+const getTextPositions = (text: string, fontSize: number, depth: number): THREE.Vector3[] => {
+  const positions: THREE.Vector3[] = [];
+  
+  // Create a canvas to render text and sample pixels
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return positions;
+  
+  // Set canvas size (higher resolution for better quality)
+  const scale = 4; // Higher scale = more particles per pixel
+  const baseWidth = 800;
+  const baseHeight = 200;
+  canvas.width = baseWidth * scale;
+  canvas.height = baseHeight * scale;
+  
+  // Clear canvas
+  ctx.fillStyle = 'black';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // Draw text
+  ctx.fillStyle = 'white';
+  ctx.font = `bold ${fontSize * scale * 10}px Arial`; // Scale font size
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  
+  // Sample pixels to get positions
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  
+  // Sample every Nth pixel to get particle positions
+  const sampleStep = 2; // Sample every 2 pixels for performance
+  const pixelToWorldScale = fontSize / (fontSize * scale * 10); // Convert pixel to world units
+  
+  for (let y = 0; y < canvas.height; y += sampleStep) {
+    for (let x = 0; x < canvas.width; x += sampleStep) {
+      const index = (y * canvas.width + x) * 4;
+      const r = data[index];
+      const g = data[index + 1];
+      const b = data[index + 2];
+      const alpha = data[index + 3];
+      
+      // If pixel is white (text), add particle position
+      if (alpha > 128 && (r > 200 || g > 200 || b > 200)) {
+        // Convert canvas coordinates to world coordinates
+        const worldX = (x - canvas.width / 2) * pixelToWorldScale;
+        const worldY = (canvas.height / 2 - y) * pixelToWorldScale; // Flip Y axis
+        
+        // Add depth variation (multiple layers)
+        for (let layer = 0; layer < 2; layer++) {
+          const z = (layer - 0.5) * depth * 0.4;
+          positions.push(new THREE.Vector3(worldX, worldY, z));
+        }
       }
+    }
+  }
+  
+  // If we have too many positions, randomly sample them
+  if (positions.length > CONFIG.counts.textParticles) {
+    const sampled: THREE.Vector3[] = [];
+    const step = positions.length / CONFIG.counts.textParticles;
+    for (let i = 0; i < CONFIG.counts.textParticles; i++) {
+      const index = Math.floor(i * step);
+      sampled.push(positions[index]);
+    }
+    return sampled;
+  }
+  
+  // If we don't have enough positions, add some random ones near text area
+  if (positions.length < CONFIG.counts.textParticles) {
+    const needed = CONFIG.counts.textParticles - positions.length;
+    
+    // Get bounding box from existing positions
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    positions.forEach(pos => {
+      minX = Math.min(minX, pos.x);
+      maxX = Math.max(maxX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxY = Math.max(maxY, pos.y);
     });
+    
+    for (let i = 0; i < needed; i++) {
+      const x = minX + (maxX - minX) * Math.random();
+      const y = minY + (maxY - minY) * Math.random();
+      const z = (Math.random() - 0.5) * depth;
+      positions.push(new THREE.Vector3(x, y, z));
+    }
+  }
+  
+  return positions;
+};
+
+// --- Component: Happy Birthday Text Particles ---
+const HappyBirthdayTextParticles = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
+  const materialRef = useRef<any>(null);
+  const groupRef = useRef<THREE.Points>(null);
+  
+  const { initialPositions, targetPositions, randoms, colors } = useMemo(() => {
+    const count = CONFIG.counts.textParticles;
+    const text = "Happy Birthday";
+    
+    // Generate target positions from text shape
+    const textPositions = getTextPositions(
+      text,
+      CONFIG.text.fontSize,
+      CONFIG.text.depth
+    );
+    
+    // Pad or trim to match count
+    while (textPositions.length < count) {
+      const randomPos = textPositions[Math.floor(Math.random() * textPositions.length)];
+      textPositions.push(randomPos.clone().add(new THREE.Vector3(
+        (Math.random() - 0.5) * 0.5,
+        (Math.random() - 0.5) * 0.5,
+        (Math.random() - 0.5) * 0.5
+      )));
+    }
+    
+    const initialPositions = new Float32Array(count * 3);
+    const targetPositions = new Float32Array(count * 3);
+    const randoms = new Float32Array(count);
+    const colors = new Float32Array(count * 3);
+    
+    // Start from random chaos positions
+    const spherePoints = random.inSphere(new Float32Array(count * 3), { radius: 30 }) as Float32Array;
+    
+    for (let i = 0; i < count; i++) {
+      // Initial chaos position
+      initialPositions[i*3] = spherePoints[i*3];
+      initialPositions[i*3+1] = spherePoints[i*3+1];
+      initialPositions[i*3+2] = spherePoints[i*3+2];
+      
+      // Target position from text
+      const targetPos = textPositions[i % textPositions.length];
+      targetPositions[i*3] = targetPos.x;
+      targetPositions[i*3+1] = targetPos.y + CONFIG.heart.height / 2 + 4.5;
+      targetPositions[i*3+2] = targetPos.z;
+      
+      randoms[i] = Math.random();
+      
+      // Random color from text particle colors
+      const color = new THREE.Color(
+        CONFIG.colors.textParticles[Math.floor(Math.random() * CONFIG.colors.textParticles.length)]
+      );
+      colors[i*3] = color.r;
+      colors[i*3+1] = color.g;
+      colors[i*3+2] = color.b;
+    }
+    
+    return { initialPositions, targetPositions, randoms, colors };
+  }, []);
+
+  useFrame((rootState, delta) => {
+    if (materialRef.current && groupRef.current) {
+      materialRef.current.uTime = rootState.clock.elapsedTime;
+      const targetProgress = state === 'FORMED' ? 1 : 0;
+      materialRef.current.uProgress = MathUtils.damp(
+        materialRef.current.uProgress || 0,
+        targetProgress,
+        2.0,
+        delta
+      );
+    }
   });
 
   return (
-    <group ref={groupRef}>
-      {data.map((obj, i) => (
-        <group key={i} scale={[obj.scale, obj.scale, obj.scale]} rotation={state === 'CHAOS' ? obj.chaosRotation : [0,0,0]}>
-          {/* 正面 */}
-          <group position={[0, 0, 0.015]}>
-            <mesh geometry={photoGeometry}>
-              <meshStandardMaterial
-                map={textures[obj.textureIndex]}
-                roughness={0.5} metalness={0}
-                emissive={CONFIG.colors.white} emissiveMap={textures[obj.textureIndex]} emissiveIntensity={1.0}
-                side={THREE.FrontSide}
-              />
-            </mesh>
-            <mesh geometry={borderGeometry} position={[0, -0.15, -0.01]}>
-              <meshStandardMaterial color={obj.borderColor} roughness={0.9} metalness={0} side={THREE.FrontSide} />
-            </mesh>
-          </group>
-          {/* 背面 */}
-          <group position={[0, 0, -0.015]} rotation={[0, Math.PI, 0]}>
-            <mesh geometry={photoGeometry}>
-              <meshStandardMaterial
-                map={textures[obj.textureIndex]}
-                roughness={0.5} metalness={0}
-                emissive={CONFIG.colors.white} emissiveMap={textures[obj.textureIndex]} emissiveIntensity={1.0}
-                side={THREE.FrontSide}
-              />
-            </mesh>
-            <mesh geometry={borderGeometry} position={[0, -0.15, -0.01]}>
-              <meshStandardMaterial color={obj.borderColor} roughness={0.9} metalness={0} side={THREE.FrontSide} />
-            </mesh>
-          </group>
-        </group>
-      ))}
-    </group>
+    <points ref={groupRef}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[initialPositions, 3]} />
+        <bufferAttribute attach="attributes-color" args={[colors, 3]} />
+        <bufferAttribute attach="attributes-aTargetPos" args={[targetPositions, 3]} />
+        <bufferAttribute attach="attributes-aRandom" args={[randoms, 1]} />
+      </bufferGeometry>
+      {/* @ts-ignore */}
+      <textParticleMaterial ref={materialRef} transparent depthWrite={false} blending={THREE.AdditiveBlending} vertexColors />
+    </points>
   );
 };
 
@@ -355,47 +444,6 @@ const FairyLights = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   );
 };
 
-// --- Component: Happy Birthday Text ---
-const HappyBirthdayText = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
-  const groupRef = useRef<THREE.Group>(null);
-  const textRef = useRef<any>(null);
-
-  useFrame((stateObj, delta) => {
-    if (groupRef.current) {
-      const targetScale = state === 'FORMED' ? 1 : 0;
-      groupRef.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), delta * 3);
-      
-      // Gentle floating animation
-      if (state === 'FORMED' && groupRef.current) {
-        const time = stateObj.clock.elapsedTime;
-        groupRef.current.position.y = CONFIG.heart.height / 2 + 4.5 + Math.sin(time * 0.8) * 0.2;
-        
-        // Pulse animation for text
-        if (textRef.current) {
-          const pulse = 1.0 + Math.sin(time * 1.5) * 0.05;
-          textRef.current.scale.set(pulse, pulse, pulse);
-        }
-      }
-    }
-  });
-
-  return (
-    <group ref={groupRef} position={[0, CONFIG.heart.height / 2 + 4.5, 0]}>
-      <Text
-        ref={textRef}
-        fontSize={3}
-        color={CONFIG.colors.gold}
-        anchorX="center"
-        anchorY="middle"
-        outlineWidth={0.15}
-        outlineColor={CONFIG.colors.pink}
-        letterSpacing={0.2}
-      >
-        Happy Birthday
-      </Text>
-    </group>
-  );
-};
 
 // --- Component: Top Heart (3D Heart with Pulse) ---
 const TopStar = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
@@ -496,11 +544,10 @@ const Experience = ({ sceneState, rotationSpeed }: { sceneState: 'CHAOS' | 'FORM
       <group position={[0, -6, 0]}>
         <Foliage state={sceneState} />
         <Suspense fallback={null}>
-           <PhotoOrnaments state={sceneState} />
            <ChristmasElements state={sceneState} />
            <FairyLights state={sceneState} />
            <TopStar state={sceneState} />
-           <HappyBirthdayText state={sceneState} />
+           <HappyBirthdayTextParticles state={sceneState} />
         </Suspense>
         <Sparkles count={600} scale={50} size={8} speed={0.4} opacity={0.4} color={CONFIG.colors.silver} />
       </group>
@@ -613,9 +660,9 @@ export default function GrandTreeApp() {
       {/* UI - Stats */}
       <div style={{ position: 'absolute', bottom: '30px', left: '40px', color: '#888', zIndex: 10, fontFamily: 'sans-serif', userSelect: 'none' }}>
         <div style={{ marginBottom: '15px' }}>
-          <p style={{ fontSize: '10px', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '4px' }}>Memories</p>
+          <p style={{ fontSize: '10px', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '4px' }}>Text Particles</p>
           <p style={{ fontSize: '24px', color: '#FFD700', fontWeight: 'bold', margin: 0 }}>
-            {CONFIG.counts.ornaments.toLocaleString()} <span style={{ fontSize: '10px', color: '#555', fontWeight: 'normal' }}>POLAROIDS</span>
+            {CONFIG.counts.textParticles.toLocaleString()} <span style={{ fontSize: '10px', color: '#555', fontWeight: 'normal' }}>PARTICLES</span>
           </p>
         </div>
         <div>
