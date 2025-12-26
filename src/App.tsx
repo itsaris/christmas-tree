@@ -289,7 +289,7 @@ const TextParticles = ({
 
 
 // --- Main Scene Experience ---
-const Experience = ({ sceneState, rotationSpeed, customName }: { sceneState: 'CHAOS' | 'FORMED', rotationSpeed: number, customName: string }) => {
+const Experience = ({ sceneState, rotationSpeed }: { sceneState: 'CHAOS' | 'FORMED', rotationSpeed: number, customName: string }) => {
   const controlsRef = useRef<any>(null);
   useFrame(() => {
     if (controlsRef.current) {
@@ -425,7 +425,7 @@ export default function GrandTreeApp() {
   const [rotationSpeed, setRotationSpeed] = useState(0);
   const [aiStatus, setAiStatus] = useState("INITIALIZING...");
   const [debugMode, setDebugMode] = useState(false);
-  const [customName, setCustomName] = useState('Your Name');
+  const [customName] = useState('Rea 💗');
 
   // Store custom name in window for access in 3D scene
   useEffect(() => {
